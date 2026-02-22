@@ -91,6 +91,7 @@ def main():
 
     font = pygame.font.SysFont(None, 24)
     save_btn_rect = pygame.Rect(10, 8, 70, 26)
+    impasto_btn_rect = pygame.Rect(90, 8, 90, 26)
 
     running = True
     while running:
@@ -103,6 +104,8 @@ def main():
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if save_btn_rect.collidepoint(event.pos):
                     _save_dialog_and_write(canvas.get_display_surface())
+                elif impasto_btn_rect.collidepoint(event.pos):
+                    canvas.impasto_visible = not canvas.impasto_visible
 
         # Drain all pending commands from the queue
         while True:
@@ -123,12 +126,26 @@ def main():
         # --- Render ---
         # Toolbar
         pygame.draw.rect(screen, TB_BG, (0, 0, WIDTH, TOOLBAR_H))
+
+        # Save button
         btn_color = TB_BTN_HOVER if save_btn_rect.collidepoint(mouse_pos) else TB_BTN
         pygame.draw.rect(screen, btn_color, save_btn_rect, border_radius=4)
         pygame.draw.rect(screen, TB_TEXT, save_btn_rect, width=1, border_radius=4)
         label = font.render("Save", True, TB_TEXT)
         label_rect = label.get_rect(center=save_btn_rect.center)
         screen.blit(label, label_rect)
+
+        # Impasto toggle button
+        hovering_imp = impasto_btn_rect.collidepoint(mouse_pos)
+        if canvas.impasto_visible:
+            imp_color = (80, 140, 200) if hovering_imp else (100, 160, 220)
+        else:
+            imp_color = TB_BTN_HOVER if hovering_imp else TB_BTN
+        pygame.draw.rect(screen, imp_color, impasto_btn_rect, border_radius=4)
+        pygame.draw.rect(screen, TB_TEXT, impasto_btn_rect, width=1, border_radius=4)
+        imp_label = font.render("Impasto", True, TB_TEXT)
+        imp_label_rect = imp_label.get_rect(center=impasto_btn_rect.center)
+        screen.blit(imp_label, imp_label_rect)
 
         # Canvas (offset below toolbar)
         screen.blit(canvas.get_display_surface(), (0, TOOLBAR_H))

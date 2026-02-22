@@ -21,8 +21,10 @@ class Canvas:
     # --- Impasto lighting constants ---
     LIGHT_DIR = np.array([-0.3, -0.5, 1.0])
     LIGHT_DIR = LIGHT_DIR / np.linalg.norm(LIGHT_DIR)
-    AMBIENT = 0.85
+    # AMBIENT is computed so that a flat surface (normal=(0,0,1)) gets
+    # light_factor = 1.0 exactly, avoiding brightness shift on unpainted areas.
     DIFFUSE_STRENGTH = 0.25
+    AMBIENT = 1.0 - DIFFUSE_STRENGTH * LIGHT_DIR[2]  # ~0.784
     SPECULAR_STRENGTH = 0.15
     SPECULAR_SHININESS = 24
     HEIGHT_SCALE = 0.6
@@ -37,6 +39,7 @@ class Canvas:
         self.height_map = np.zeros((height, width), dtype=np.float32)
         self.display_surface = pygame.Surface((width, height))
         self._lighting_dirty = True
+        self.impasto_visible = False
         self._undo_stack: list[tuple[pygame.Surface, np.ndarray]] = []
 
     def _save_undo(self):
@@ -122,18 +125,18 @@ class Canvas:
 
     def _recompute_lighting(self):
         """Apply impasto lighting to raw surface → display_surface."""
-        # Get raw pixels as numpy array (H, W, 3)
+        # Copy raw pixels and release the surface lock immediately
         raw = pygame.surfarray.pixels3d(self.surface)  # shape (W, H, 3)
-        raw_hwc = np.transpose(raw, (1, 0, 2)).astype(np.float32)  # (H, W, 3)
+        raw_hwc = np.transpose(raw, (1, 0, 2)).astype(np.float32)  # (H, W, 3) copy
+        del raw  # release surface lock
 
         # Compute normals from height_map gradient
         dh_dy, dh_dx = np.gradient(self.height_map * self.HEIGHT_SCALE)
         # Normal vectors: (-dh/dx, -dh/dy, 1.0), then normalize
-        nz = np.ones_like(dh_dx)
         norm = np.sqrt(dh_dx * dh_dx + dh_dy * dh_dy + 1.0)
         nx = -dh_dx / norm
         ny = -dh_dy / norm
-        nz = nz / norm
+        nz = 1.0 / norm
 
         # Diffuse: dot(N, L)
         lx, ly, lz = self.LIGHT_DIR
@@ -145,8 +148,10 @@ class Canvas:
         hv = hv / np.linalg.norm(hv)
         n_dot_h = np.clip(nx * hv[0] + ny * hv[1] + nz * hv[2], 0.0, 1.0)
         specular = np.power(n_dot_h, self.SPECULAR_SHININESS)
+        # Only show specular highlights on raised (painted) areas
+        specular *= (self.height_map > 0.05)
 
-        # Final color
+        # Final color — AMBIENT is tuned so flat surfaces get factor=1.0
         light_factor = self.AMBIENT + self.DIFFUSE_STRENGTH * diffuse
         light_factor = light_factor[:, :, np.newaxis]  # broadcast to (H, W, 1)
         specular_term = (self.SPECULAR_STRENGTH * specular * 255.0)[:, :, np.newaxis]
@@ -159,12 +164,13 @@ class Canvas:
         display_arr = pygame.surfarray.pixels3d(self.display_surface)
         display_arr[:] = out
         del display_arr  # release surface lock
-        del raw  # release surface lock
 
         self._lighting_dirty = False
 
     def get_display_surface(self) -> pygame.Surface:
-        """Return the lit display surface, recomputing if needed."""
+        """Return the lit display surface if impasto is visible, else raw."""
+        if not self.impasto_visible:
+            return self.surface
         if self._lighting_dirty:
             self._recompute_lighting()
         return self.display_surface
@@ -200,8 +206,11 @@ class Canvas:
                 ey = int(cy + r_jitter * math.sin(a))
                 pygame.draw.line(self.surface, blended, (cx, cy), (ex, ey), 1)
 
-        # Accumulate height for impasto lighting
-        self._accumulate_height(cx, cy, radius, paint_strength * 0.8)
+        # Accumulate height for impasto lighting.
+        # Scale down for large brushes so background sweeps don't saturate
+        # the height map before detail work begins.
+        size_scale = 1.0 / (1.0 + max(0, radius - 12) * 0.06)
+        self._accumulate_height(cx, cy, radius, paint_strength * 0.8 * size_scale)
 
     def _oil_stroke(self, points: list[tuple[int, int]]):
         """Lay down oil-paint dabs along a series of points.
