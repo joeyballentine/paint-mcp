@@ -6,6 +6,7 @@ import os
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
 import sys
+import time
 import queue
 import threading
 
@@ -85,19 +86,18 @@ def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, WINDOW_H))
     pygame.display.set_caption("Paint MCP")
-    clock = pygame.time.Clock()
-
     canvas = Canvas(WIDTH, HEIGHT)
 
     font = pygame.font.SysFont(None, 24)
     save_btn_rect = pygame.Rect(10, 8, 70, 26)
     impasto_btn_rect = pygame.Rect(90, 8, 90, 26)
 
+    frame_interval = 1.0 / FPS
+    last_render = time.monotonic()
+
     running = True
     while running:
-        mouse_pos = pygame.mouse.get_pos()
-
-        # Handle pygame events
+        # Handle pygame events (non-blocking pump)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -107,7 +107,8 @@ def main():
                 elif impasto_btn_rect.collidepoint(event.pos):
                     canvas.impasto_visible = not canvas.impasto_visible
 
-        # Drain all pending commands from the queue
+        # Drain all pending commands from the queue — always, regardless of
+        # window focus, so MCP drawing commands are never blocked.
         while True:
             try:
                 cmd = command_queue.get_nowait()
@@ -123,34 +124,43 @@ def main():
                 except Exception as e:
                     print(f"Command error: {e}", file=sys.stderr)
 
-        # --- Render ---
-        # Toolbar
-        pygame.draw.rect(screen, TB_BG, (0, 0, WIDTH, TOOLBAR_H))
+        # --- Render at FPS, but don't sleep long ---
+        now = time.monotonic()
+        if now - last_render >= frame_interval:
+            last_render = now
+            mouse_pos = pygame.mouse.get_pos()
 
-        # Save button
-        btn_color = TB_BTN_HOVER if save_btn_rect.collidepoint(mouse_pos) else TB_BTN
-        pygame.draw.rect(screen, btn_color, save_btn_rect, border_radius=4)
-        pygame.draw.rect(screen, TB_TEXT, save_btn_rect, width=1, border_radius=4)
-        label = font.render("Save", True, TB_TEXT)
-        label_rect = label.get_rect(center=save_btn_rect.center)
-        screen.blit(label, label_rect)
+            # Toolbar
+            pygame.draw.rect(screen, TB_BG, (0, 0, WIDTH, TOOLBAR_H))
 
-        # Impasto toggle button
-        hovering_imp = impasto_btn_rect.collidepoint(mouse_pos)
-        if canvas.impasto_visible:
-            imp_color = (80, 140, 200) if hovering_imp else (100, 160, 220)
-        else:
-            imp_color = TB_BTN_HOVER if hovering_imp else TB_BTN
-        pygame.draw.rect(screen, imp_color, impasto_btn_rect, border_radius=4)
-        pygame.draw.rect(screen, TB_TEXT, impasto_btn_rect, width=1, border_radius=4)
-        imp_label = font.render("Impasto", True, TB_TEXT)
-        imp_label_rect = imp_label.get_rect(center=impasto_btn_rect.center)
-        screen.blit(imp_label, imp_label_rect)
+            # Save button
+            btn_color = TB_BTN_HOVER if save_btn_rect.collidepoint(mouse_pos) else TB_BTN
+            pygame.draw.rect(screen, btn_color, save_btn_rect, border_radius=4)
+            pygame.draw.rect(screen, TB_TEXT, save_btn_rect, width=1, border_radius=4)
+            label = font.render("Save", True, TB_TEXT)
+            label_rect = label.get_rect(center=save_btn_rect.center)
+            screen.blit(label, label_rect)
 
-        # Canvas (offset below toolbar)
-        screen.blit(canvas.get_display_surface(), (0, TOOLBAR_H))
-        pygame.display.flip()
-        clock.tick(FPS)
+            # Impasto toggle button
+            hovering_imp = impasto_btn_rect.collidepoint(mouse_pos)
+            if canvas.impasto_visible:
+                imp_color = (80, 140, 200) if hovering_imp else (100, 160, 220)
+            else:
+                imp_color = TB_BTN_HOVER if hovering_imp else TB_BTN
+            pygame.draw.rect(screen, imp_color, impasto_btn_rect, border_radius=4)
+            pygame.draw.rect(screen, TB_TEXT, impasto_btn_rect, width=1, border_radius=4)
+            imp_label = font.render("Impasto", True, TB_TEXT)
+            imp_label_rect = imp_label.get_rect(center=impasto_btn_rect.center)
+            screen.blit(imp_label, imp_label_rect)
+
+            # Canvas (offset below toolbar)
+            screen.blit(canvas.get_display_surface(), (0, TOOLBAR_H))
+            pygame.display.flip()
+
+        # Short sleep to avoid CPU spin while still processing commands promptly.
+        # Much shorter than clock.tick(30)'s ~33ms sleep, so the queue is drained
+        # frequently even when the window is unfocused.
+        pygame.time.wait(2)
 
     pygame.quit()
 

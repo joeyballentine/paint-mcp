@@ -241,7 +241,7 @@ class Canvas:
                     paint_strength: float, direction: float,
                     half_w: float, half_h: float, is_ellipse: bool = False,
                     hard_edge: bool = False, height_mult: float = 1.0):
-        """Generic shaped dab renderer used by flat, filbert, fan, and knife.
+        """Generic shaped dab renderer using numpy bulk ops.
 
         half_w, half_h: half-extents in local coords (before rotation).
         is_ellipse: True for elliptical mask (filbert), False for rectangular.
@@ -251,7 +251,7 @@ class Canvas:
         cos_d = math.cos(-direction)
         sin_d = math.sin(-direction)
 
-        # Bounding box in world coords (axis-aligned)
+        # Axis-aligned bounding box of the rotated shape
         extent = int(math.ceil(max(half_w, half_h))) + 1
         x_lo = max(0, cx - extent)
         x_hi = min(self.width, cx + extent + 1)
@@ -260,51 +260,68 @@ class Canvas:
         if x_lo >= x_hi or y_lo >= y_hi:
             return
 
-        # Sample canvas color around the center for blending
-        canvas_color = self._avg_color_around(cx, cy, max(1, int(min(half_w, half_h))))
+        # Build coordinate grids for the bounding box
+        ys = np.arange(y_lo, y_hi, dtype=np.float32)
+        xs = np.arange(x_lo, x_hi, dtype=np.float32)
+        gx, gy = np.meshgrid(xs, ys)  # (rows, cols)
+        dx = gx - cx
+        dy = gy - cy
 
-        # We iterate in steps for performance (matching ring approach density)
-        for wy in range(y_lo, y_hi):
-            for wx in range(x_lo, x_hi):
-                # Rotate to local coordinates
-                dx = wx - cx
-                dy = wy - cy
-                lx = dx * cos_d - dy * sin_d
-                ly = dx * sin_d + dy * cos_d
+        # Rotate to local (brush-aligned) coordinates
+        lx = dx * cos_d - dy * sin_d
+        ly = dx * sin_d + dy * cos_d
 
-                # Test if inside shape
-                if is_ellipse:
-                    # Ellipse: (lx/half_w)^2 + (ly/half_h)^2 <= 1
-                    nx = lx / half_w if half_w > 0 else 0
-                    ny = ly / half_h if half_h > 0 else 0
-                    dist_sq = nx * nx + ny * ny
-                    if dist_sq > 1.0:
-                        continue
-                    t = math.sqrt(dist_sq)  # 0 at center, 1 at edge
-                else:
-                    # Rectangle: |lx| <= half_w and |ly| <= half_h
-                    if abs(lx) > half_w or abs(ly) > half_h:
-                        continue
-                    # Normalized distance: max of the two axis ratios
-                    tx = abs(lx) / half_w if half_w > 0 else 0
-                    ty = abs(ly) / half_h if half_h > 0 else 0
-                    t = max(tx, ty)
+        # Compute shape mask and normalized distance t (0=center, 1=edge)
+        if is_ellipse:
+            nx = lx / half_w if half_w > 0 else lx * 0
+            ny = ly / half_h if half_h > 0 else ly * 0
+            dist_sq = nx * nx + ny * ny
+            mask = dist_sq <= 1.0
+            t = np.sqrt(dist_sq)
+        else:
+            abs_lx = np.abs(lx)
+            abs_ly = np.abs(ly)
+            mask = (abs_lx <= half_w) & (abs_ly <= half_h)
+            tx = abs_lx / half_w if half_w > 0 else abs_lx * 0
+            ty = abs_ly / half_h if half_h > 0 else abs_ly * 0
+            t = np.maximum(tx, ty)
 
-                # Compute paint strength with falloff
-                if hard_edge:
-                    local_strength = paint_strength * 0.95
-                else:
-                    # Cubic falloff from center to edge
-                    edge_blend = t * t * t
-                    local_strength = paint_strength * (1.0 - edge_blend * 0.85)
+        # Painterly jitter: randomly skip ~5% of edge pixels
+        jitter = np.random.random(t.shape).astype(np.float32)
+        mask = mask & ~((t > 0.7) & (jitter < 0.05))
 
-                # Add jitter for painterly texture (skip ~5% of edge pixels)
-                if t > 0.7 and random.random() < 0.05:
-                    continue
+        if not np.any(mask):
+            return
 
-                pixel_color = self._sample_color(wx, wy)
-                blended = self._blend(pixel_color, brush_color, local_strength)
-                self.surface.set_at((wx, wy), blended)
+        # Compute per-pixel blend strength
+        if hard_edge:
+            strength = np.where(mask, paint_strength * 0.95, 0.0).astype(np.float32)
+        else:
+            edge_blend = t * t * t
+            strength = np.where(mask,
+                                paint_strength * (1.0 - edge_blend * 0.85),
+                                0.0).astype(np.float32)
+
+        # Read canvas pixels for the region  — surfarray is (W, H, 3),
+        # so slice as [x_lo:x_hi, y_lo:y_hi] then transpose to (rows, cols, 3).
+        raw = pygame.surfarray.pixels3d(self.surface)
+        region = raw[x_lo:x_hi, y_lo:y_hi].transpose(1, 0, 2).astype(np.float32)
+        del raw  # release surface lock
+
+        # Blend: result = canvas * (1 - s) + brush * s
+        brush_arr = np.array(brush_color, dtype=np.float32)
+        s = strength[:, :, np.newaxis]  # (rows, cols, 1)
+        blended = region * (1.0 - s) + brush_arr * s
+        np.clip(blended, 0, 255, out=blended)
+
+        # Write back only masked pixels
+        raw = pygame.surfarray.pixels3d(self.surface)
+        # Transpose blended back to (cols, rows, 3) for surfarray
+        blended_t = blended.transpose(1, 0, 2).astype(np.uint8)
+        # Build transposed mask (cols, rows) matching surfarray layout
+        mask_t = mask.T
+        raw[x_lo:x_hi, y_lo:y_hi][mask_t] = blended_t[mask_t]
+        del raw  # release surface lock
 
         # Accumulate height for impasto
         effective_r = int(max(half_w, half_h))
