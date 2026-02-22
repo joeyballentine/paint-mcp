@@ -293,6 +293,26 @@ class Canvas:
         if not np.any(mask):
             return
 
+        # --- Bristle texture ---
+        # Simulate individual bristle tracks across the brush width (ly axis).
+        # Each bristle band is ~1.5px wide with its own random intensity,
+        # creating visible streaks along the stroke direction.
+        bristle_spacing = 1.5
+        bristle_count = max(1, int(2 * half_h / bristle_spacing))
+        # Quantize ly into bristle bands
+        bristle_idx = np.floor((ly + half_h) / bristle_spacing).astype(np.int32)
+        np.clip(bristle_idx, 0, bristle_count, out=bristle_idx)
+        # Random intensity per bristle (some bristles carry more paint)
+        bristle_strengths = np.random.uniform(0.55, 1.0,
+                                              size=bristle_count + 1).astype(np.float32)
+        bristle_mod = bristle_strengths[bristle_idx]
+        # Add fine per-pixel noise on top for grain
+        pixel_noise = np.random.uniform(0.88, 1.0, size=t.shape).astype(np.float32)
+        bristle_mod *= pixel_noise
+        # Palette knife gets minimal bristle texture (hard, smooth edge)
+        if hard_edge:
+            bristle_mod = bristle_mod * 0.3 + 0.7  # dampen toward uniform
+
         # Compute per-pixel blend strength
         if hard_edge:
             strength = np.where(mask, paint_strength * 0.95, 0.0).astype(np.float32)
@@ -301,6 +321,9 @@ class Canvas:
             strength = np.where(mask,
                                 paint_strength * (1.0 - edge_blend * 0.85),
                                 0.0).astype(np.float32)
+
+        # Apply bristle texture to strength
+        strength *= bristle_mod
 
         # Read canvas pixels for the region  — surfarray is (W, H, 3),
         # so slice as [x_lo:x_hi, y_lo:y_hi] then transpose to (rows, cols, 3).
