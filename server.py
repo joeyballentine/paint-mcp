@@ -60,7 +60,7 @@ def _handle_request(cmd: dict, canvas: Canvas):
             result["data"] = data
         elif action == "save_file":
             path = cmd["path"]
-            pygame.image.save(canvas.surface, path)
+            pygame.image.save(canvas.get_display_surface(), path)
             result["data"] = f"Canvas saved to {path}"
         else:
             result["error"] = f"Unknown request action: {action}"
@@ -102,7 +102,7 @@ def main():
                 running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if save_btn_rect.collidepoint(event.pos):
-                    _save_dialog_and_write(canvas.surface)
+                    _save_dialog_and_write(canvas.get_display_surface())
 
         # Drain all pending commands from the queue
         while True:
@@ -131,7 +131,7 @@ def main():
         screen.blit(label, label_rect)
 
         # Canvas (offset below toolbar)
-        screen.blit(canvas.surface, (0, TOOLBAR_H))
+        screen.blit(canvas.get_display_surface(), (0, TOOLBAR_H))
         pygame.display.flip()
         clock.tick(FPS)
 
