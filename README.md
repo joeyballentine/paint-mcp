@@ -23,12 +23,13 @@ This opens an 800x600 pygame canvas and starts the MCP server on stdio. Connect 
 | `get_canvas_info` | Get canvas dimensions, current color, brush size, and mode |
 | `set_color` | Set drawing color (RGB 0-255) |
 | `set_brush_size` | Set brush size (1-50 px) |
+| `set_brush_shape` | Set brush shape: round, flat, filbert, fan, or palette_knife |
 | `draw_point` | Draw a single dot |
 | `draw_line` | Draw a line between two points |
 | `draw_rect` | Draw a rectangle (blocked in oil paint mode) |
 | `draw_ellipse` | Draw an ellipse (blocked in oil paint mode) |
 | `draw_path` | Draw a freehand path through coordinate pairs |
-| `batch_strokes` | Execute many strokes in one call with per-stroke color/size overrides |
+| `batch_strokes` | Execute many strokes in one call with per-stroke color/size/shape overrides |
 | `blend_path` | Smudge/blend existing colors along a path |
 | `flood_fill` | Bucket fill an area (blocked in oil paint mode) |
 | `clear_canvas` | Clear to white |
@@ -49,8 +50,9 @@ When oil paint mode is enabled:
 - **Color mixing** — the brush picks up existing canvas color as it moves, so overlapping strokes blend naturally.
 - **Paint depletion** — strokes start opaque and gradually thin out as the brush runs dry. Each new stroke reloads the brush.
 - **Soft edges** — dabs use concentric rings with cubic falloff for painterly texture.
+- **Brush shapes** — five brush types (round, flat, filbert, fan, palette_knife) create distinct stroke characteristics. Flat for broad washes, filbert for general work, fan for blending, palette knife for bold impasto.
 - **Shapes disabled** — rectangles, ellipses, and flood fill are blocked. Only points, lines, and paths are available.
-- **`batch_strokes`** is the recommended way to paint — send many short strokes per call, each with its own color and brush size.
+- **`batch_strokes`** is the recommended way to paint — send many short strokes per call, each with its own color, brush size, and brush shape.
 
 ## Examples
 

@@ -7,12 +7,16 @@ import numpy as np
 from dataclasses import dataclass, field
 
 
+VALID_BRUSH_SHAPES = ("round", "flat", "filbert", "fan", "palette_knife")
+
+
 @dataclass
 class DrawState:
     color: tuple = (0, 0, 0)
     brush_size: int = 3
     background_color: tuple = (255, 255, 255)
     oil_paint: bool = False
+    brush_shape: str = "round"
 
 
 class Canvas:
@@ -72,6 +76,11 @@ class Canvas:
 
     def _do_set_oil_paint(self, cmd: dict):
         self.state.oil_paint = cmd["enabled"]
+
+    def _do_set_brush_shape(self, cmd: dict):
+        shape = cmd["shape"]
+        if shape in VALID_BRUSH_SHAPES:
+            self.state.brush_shape = shape
 
     # --- Oil paint helpers ---
 
@@ -176,15 +185,33 @@ class Canvas:
         return self.display_surface
 
     def _oil_dab(self, cx: int, cy: int, radius: int, brush_color: tuple = None,
-                 paint_strength: float = 0.75):
-        """Paint a single oil-paint dab with soft edges.
+                 paint_strength: float = 0.75, direction: float = 0.0):
+        """Paint a single oil-paint dab, dispatching to shape-specific method.
 
         brush_color: the paint on the brush (defaults to state color).
         paint_strength (0..1): how much brush color vs canvas color.
-        The dab is strongest at the center and fades toward the edges."""
+        direction: stroke direction in radians (0 = right).
+        """
         if brush_color is None:
             brush_color = self.state.color
 
+        shape = self.state.brush_shape
+        if shape == "round":
+            self._dab_round(cx, cy, radius, brush_color, paint_strength)
+        elif shape == "flat":
+            self._dab_flat(cx, cy, radius, brush_color, paint_strength, direction)
+        elif shape == "filbert":
+            self._dab_filbert(cx, cy, radius, brush_color, paint_strength, direction)
+        elif shape == "fan":
+            self._dab_fan(cx, cy, radius, brush_color, paint_strength, direction)
+        elif shape == "palette_knife":
+            self._dab_knife(cx, cy, radius, brush_color, paint_strength, direction)
+        else:
+            self._dab_round(cx, cy, radius, brush_color, paint_strength)
+
+    def _dab_round(self, cx: int, cy: int, radius: int, brush_color: tuple,
+                   paint_strength: float):
+        """Original circular dab with soft edges and concentric rings."""
         # Paint concentric rings from outside in; each ring blends more brush
         rings = max(2, radius // 2)
         for ring in range(rings, -1, -1):
@@ -207,10 +234,117 @@ class Canvas:
                 pygame.draw.line(self.surface, blended, (cx, cy), (ex, ey), 1)
 
         # Accumulate height for impasto lighting.
-        # Scale down for large brushes so background sweeps don't saturate
-        # the height map before detail work begins.
         size_scale = 1.0 / (1.0 + max(0, radius - 12) * 0.06)
         self._accumulate_height(cx, cy, radius, paint_strength * 0.8 * size_scale)
+
+    def _dab_shaped(self, cx: int, cy: int, radius: int, brush_color: tuple,
+                    paint_strength: float, direction: float,
+                    half_w: float, half_h: float, is_ellipse: bool = False,
+                    hard_edge: bool = False, height_mult: float = 1.0):
+        """Generic shaped dab renderer used by flat, filbert, fan, and knife.
+
+        half_w, half_h: half-extents in local coords (before rotation).
+        is_ellipse: True for elliptical mask (filbert), False for rectangular.
+        hard_edge: True for minimal falloff (palette knife).
+        height_mult: multiplier for impasto height accumulation.
+        """
+        cos_d = math.cos(-direction)
+        sin_d = math.sin(-direction)
+
+        # Bounding box in world coords (axis-aligned)
+        extent = int(math.ceil(max(half_w, half_h))) + 1
+        x_lo = max(0, cx - extent)
+        x_hi = min(self.width, cx + extent + 1)
+        y_lo = max(0, cy - extent)
+        y_hi = min(self.height, cy + extent + 1)
+        if x_lo >= x_hi or y_lo >= y_hi:
+            return
+
+        # Sample canvas color around the center for blending
+        canvas_color = self._avg_color_around(cx, cy, max(1, int(min(half_w, half_h))))
+
+        # We iterate in steps for performance (matching ring approach density)
+        for wy in range(y_lo, y_hi):
+            for wx in range(x_lo, x_hi):
+                # Rotate to local coordinates
+                dx = wx - cx
+                dy = wy - cy
+                lx = dx * cos_d - dy * sin_d
+                ly = dx * sin_d + dy * cos_d
+
+                # Test if inside shape
+                if is_ellipse:
+                    # Ellipse: (lx/half_w)^2 + (ly/half_h)^2 <= 1
+                    nx = lx / half_w if half_w > 0 else 0
+                    ny = ly / half_h if half_h > 0 else 0
+                    dist_sq = nx * nx + ny * ny
+                    if dist_sq > 1.0:
+                        continue
+                    t = math.sqrt(dist_sq)  # 0 at center, 1 at edge
+                else:
+                    # Rectangle: |lx| <= half_w and |ly| <= half_h
+                    if abs(lx) > half_w or abs(ly) > half_h:
+                        continue
+                    # Normalized distance: max of the two axis ratios
+                    tx = abs(lx) / half_w if half_w > 0 else 0
+                    ty = abs(ly) / half_h if half_h > 0 else 0
+                    t = max(tx, ty)
+
+                # Compute paint strength with falloff
+                if hard_edge:
+                    local_strength = paint_strength * 0.95
+                else:
+                    # Cubic falloff from center to edge
+                    edge_blend = t * t * t
+                    local_strength = paint_strength * (1.0 - edge_blend * 0.85)
+
+                # Add jitter for painterly texture (skip ~5% of edge pixels)
+                if t > 0.7 and random.random() < 0.05:
+                    continue
+
+                pixel_color = self._sample_color(wx, wy)
+                blended = self._blend(pixel_color, brush_color, local_strength)
+                self.surface.set_at((wx, wy), blended)
+
+        # Accumulate height for impasto
+        effective_r = int(max(half_w, half_h))
+        size_scale = 1.0 / (1.0 + max(0, effective_r - 12) * 0.06)
+        self._accumulate_height(cx, cy, effective_r,
+                                paint_strength * 0.8 * size_scale * height_mult)
+
+    def _dab_flat(self, cx: int, cy: int, radius: int, brush_color: tuple,
+                  paint_strength: float, direction: float):
+        """Flat brush: wide rectangle, aspect ratio ~3:1."""
+        half_w = radius * 1.5   # wide along stroke
+        half_h = radius * 0.5   # narrow perpendicular
+        self._dab_shaped(cx, cy, radius, brush_color, paint_strength, direction,
+                         half_w, half_h, is_ellipse=False)
+
+    def _dab_filbert(self, cx: int, cy: int, radius: int, brush_color: tuple,
+                     paint_strength: float, direction: float):
+        """Filbert brush: oval, aspect ratio ~2.5:1, soft edges."""
+        half_w = radius * 1.25
+        half_h = radius * 0.5
+        self._dab_shaped(cx, cy, radius, brush_color, paint_strength, direction,
+                         half_w, half_h, is_ellipse=True)
+
+    def _dab_fan(self, cx: int, cy: int, radius: int, brush_color: tuple,
+                 paint_strength: float, direction: float):
+        """Fan brush: very wide, very thin rectangle, aspect ratio ~6:1."""
+        half_w = radius * 3.0
+        half_h = radius * 0.5
+        # Fan brush has lighter paint application
+        self._dab_shaped(cx, cy, radius, brush_color, paint_strength * 0.6,
+                         direction, half_w, half_h, is_ellipse=False)
+
+    def _dab_knife(self, cx: int, cy: int, radius: int, brush_color: tuple,
+                   paint_strength: float, direction: float):
+        """Palette knife: hard-edged rectangle, aspect ratio ~4:1, extra impasto."""
+        half_w = radius * 2.0
+        half_h = radius * 0.5
+        self._dab_shaped(cx, cy, radius, brush_color, paint_strength, direction,
+                         half_w, half_h, is_ellipse=False, hard_edge=True,
+                         height_mult=1.8)
 
     def _oil_stroke(self, points: list[tuple[int, int]]):
         """Lay down oil-paint dabs along a series of points.
@@ -233,6 +367,16 @@ class Canvas:
         pickup_rate = 0.03                      # how fast canvas color mixes in
 
         for i, (px, py) in enumerate(points):
+            # Compute stroke direction from surrounding points
+            if i < n - 1:
+                direction = math.atan2(points[i + 1][1] - py,
+                                       points[i + 1][0] - px)
+            elif i > 0:
+                direction = math.atan2(py - points[i - 1][1],
+                                       px - points[i - 1][0])
+            else:
+                direction = 0.0
+
             # Sample what's under the brush before we stamp
             canvas_color = self._avg_color_around(px, py, self.state.brush_size)
 
@@ -245,7 +389,7 @@ class Canvas:
             size_factor = 0.8 + 0.2 * paint_load
             r = max(1, int(self.state.brush_size * size_jitter * size_factor))
             self._oil_dab(px, py, r, brush_color=carried_color,
-                          paint_strength=paint_load)
+                          paint_strength=paint_load, direction=direction)
 
             # Exponential depletion
             paint_load *= decay
@@ -335,6 +479,87 @@ class Canvas:
         return [(int(x1 + dx * t / steps), int(y1 + dy * t / steps))
                 for t in range(steps + 1)]
 
+    # --- Normal-mode shape helpers ---
+
+    def _shape_extents(self, radius: int) -> tuple[float, float]:
+        """Return (half_w, half_h) for the current brush shape at given radius."""
+        shape = self.state.brush_shape
+        if shape == "flat":
+            return radius * 1.5, radius * 0.5
+        elif shape == "filbert":
+            return radius * 1.25, radius * 0.5
+        elif shape == "fan":
+            return radius * 3.0, radius * 0.5
+        elif shape == "palette_knife":
+            return radius * 2.0, radius * 0.5
+        return radius, radius  # round
+
+    def _draw_shape_polygon(self, cx: int, cy: int, radius: int,
+                            direction: float = 0.0):
+        """Draw a filled rotated polygon for non-round shapes in normal mode."""
+        shape = self.state.brush_shape
+        half_w, half_h = self._shape_extents(radius)
+
+        if shape == "filbert":
+            # Approximate ellipse with polygon points
+            cos_d = math.cos(direction)
+            sin_d = math.sin(direction)
+            pts = []
+            for a_step in range(0, 360, 15):
+                a = math.radians(a_step)
+                lx = half_w * math.cos(a)
+                ly = half_h * math.sin(a)
+                wx = cx + lx * cos_d - ly * sin_d
+                wy = cy + lx * sin_d + ly * cos_d
+                pts.append((int(wx), int(wy)))
+            if len(pts) >= 3:
+                pygame.draw.polygon(self.surface, self.state.color, pts)
+        else:
+            # Rectangle shapes (flat, fan, palette_knife)
+            cos_d = math.cos(direction)
+            sin_d = math.sin(direction)
+            corners = [(-half_w, -half_h), (half_w, -half_h),
+                       (half_w, half_h), (-half_w, half_h)]
+            pts = []
+            for lx, ly in corners:
+                wx = cx + lx * cos_d - ly * sin_d
+                wy = cy + lx * sin_d + ly * cos_d
+                pts.append((int(wx), int(wy)))
+            pygame.draw.polygon(self.surface, self.state.color, pts)
+
+    def _normal_draw_point(self, x: int, y: int):
+        """Draw a single point in normal mode, respecting brush shape."""
+        if self.state.brush_shape == "round":
+            pygame.draw.circle(self.surface, self.state.color,
+                               (x, y), self.state.brush_size)
+        else:
+            self._draw_shape_polygon(x, y, self.state.brush_size, 0.0)
+
+    def _normal_draw_line(self, x1: int, y1: int, x2: int, y2: int):
+        """Draw a line in normal mode, respecting brush shape."""
+        if self.state.brush_shape == "round":
+            pygame.draw.line(self.surface, self.state.color,
+                             (x1, y1), (x2, y2), self.state.brush_size)
+        else:
+            direction = math.atan2(y2 - y1, x2 - x1)
+            pts = self._interpolate(x1, y1, x2, y2)
+            for px, py in pts:
+                self._draw_shape_polygon(px, py, self.state.brush_size, direction)
+
+    def _normal_draw_path(self, points: list):
+        """Draw a path in normal mode, respecting brush shape."""
+        if self.state.brush_shape == "round":
+            pygame.draw.lines(self.surface, self.state.color, False,
+                              points, self.state.brush_size)
+        else:
+            for i in range(len(points) - 1):
+                p1, p2 = points[i], points[i + 1]
+                direction = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+                seg_pts = self._interpolate(p1[0], p1[1], p2[0], p2[1])
+                for px, py in seg_pts:
+                    self._draw_shape_polygon(px, py, self.state.brush_size,
+                                             direction)
+
     # --- Drawing operations (save undo first) ---
 
     def _do_draw_point(self, cmd: dict):
@@ -342,10 +567,7 @@ class Canvas:
         if self.state.oil_paint:
             self._oil_dab(cmd["x"], cmd["y"], self.state.brush_size)
         else:
-            pygame.draw.circle(
-                self.surface, self.state.color,
-                (cmd["x"], cmd["y"]), self.state.brush_size
-            )
+            self._normal_draw_point(cmd["x"], cmd["y"])
 
     def _do_draw_line(self, cmd: dict):
         self._save_undo()
@@ -353,11 +575,7 @@ class Canvas:
             pts = self._interpolate(cmd["x1"], cmd["y1"], cmd["x2"], cmd["y2"])
             self._oil_stroke(pts)
         else:
-            pygame.draw.line(
-                self.surface, self.state.color,
-                (cmd["x1"], cmd["y1"]), (cmd["x2"], cmd["y2"]),
-                self.state.brush_size
-            )
+            self._normal_draw_line(cmd["x1"], cmd["y1"], cmd["x2"], cmd["y2"])
 
     def _do_draw_rect(self, cmd: dict):
         self._save_undo()
@@ -385,10 +603,7 @@ class Canvas:
                     points[i + 1][0], points[i + 1][1]))
             self._oil_stroke(dense)
         else:
-            pygame.draw.lines(
-                self.surface, self.state.color, False,
-                points, self.state.brush_size
-            )
+            self._normal_draw_path(points)
 
     def _do_batch_strokes(self, cmd: dict):
         """Execute many strokes in one command.  Each stroke gets a fresh
@@ -401,6 +616,10 @@ class Canvas:
                 self.state.color = tuple(s["color"])
             if "brush_size" in s:
                 self.state.brush_size = s["brush_size"]
+            if "brush_shape" in s:
+                shape = s["brush_shape"]
+                if shape in VALID_BRUSH_SHAPES:
+                    self.state.brush_shape = shape
 
             kind = s.get("type", "path")
             if kind == "line":
@@ -408,10 +627,8 @@ class Canvas:
                 if self.state.oil_paint:
                     self._oil_stroke(pts)
                 else:
-                    pygame.draw.line(
-                        self.surface, self.state.color,
-                        (s["x1"], s["y1"]), (s["x2"], s["y2"]),
-                        self.state.brush_size)
+                    self._normal_draw_line(s["x1"], s["y1"],
+                                           s["x2"], s["y2"])
             elif kind == "path":
                 points = s["points"]
                 if len(points) < 2:
@@ -424,16 +641,12 @@ class Canvas:
                             points[i + 1][0], points[i + 1][1]))
                     self._oil_stroke(dense)
                 else:
-                    pygame.draw.lines(
-                        self.surface, self.state.color, False,
-                        points, self.state.brush_size)
+                    self._normal_draw_path(points)
             elif kind == "point":
                 if self.state.oil_paint:
                     self._oil_dab(s["x"], s["y"], self.state.brush_size)
                 else:
-                    pygame.draw.circle(
-                        self.surface, self.state.color,
-                        (s["x"], s["y"]), self.state.brush_size)
+                    self._normal_draw_point(s["x"], s["y"])
 
     def _do_blend_path(self, cmd: dict):
         self._save_undo()

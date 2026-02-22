@@ -20,6 +20,7 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
     _color = [0, 0, 0]
     _brush_size = [3]
     _oil_paint = [False]
+    _brush_shape = ["round"]
 
     @mcp.tool()
     def get_canvas_info() -> str:
@@ -28,6 +29,7 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
             f"Canvas: {width}x{height}, "
             f"color: rgb({_color[0]}, {_color[1]}, {_color[2]}), "
             f"brush_size: {_brush_size[0]}, "
+            f"brush_shape: {_brush_shape[0]}, "
             f"oil_paint_mode: {'on' if _oil_paint[0] else 'off'}"
         )
 
@@ -48,6 +50,33 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
         if enabled:
             return "Oil paint mode enabled. Call get_oil_painting_guide() to learn proper technique."
         return "Oil paint mode disabled. Call get_drawing_guide() for standard drawing tips."
+
+    @mcp.tool()
+    def set_brush_shape(shape: str) -> str:
+        """Set the brush shape for painting strokes.
+
+        Available shapes:
+        - "round"         — Circular dab (default). Uniform in all directions.
+        - "flat"          — Wide rectangular dab oriented along stroke direction.
+                            Sharp corners, even coverage. Great for skies, backgrounds,
+                            and blocking in large areas.
+        - "filbert"       — Oval dab oriented along stroke direction. Soft rounded
+                            edges. The most versatile brush — good for general painting.
+        - "fan"           — Very wide, very thin dab. Use for light blending passes
+                            and foliage/grass texture. Applies less paint per dab.
+        - "palette_knife" — Hard-edged rectangle with minimal paint falloff. Creates
+                            bold impasto marks with sharp edges and extra height.
+
+        The shape affects how each dab is stamped: non-round shapes are oriented
+        along the stroke direction automatically. Works in both oil-paint and
+        normal modes. Can also be set per-stroke in batch_strokes via
+        "brush_shape" key."""
+        valid = ("round", "flat", "filbert", "fan", "palette_knife")
+        if shape not in valid:
+            return f"Invalid shape '{shape}'. Valid shapes: {', '.join(valid)}"
+        _brush_shape[0] = shape
+        command_queue.put({"action": "set_brush_shape", "shape": shape})
+        return f"Brush shape set to {shape}"
 
     @mcp.tool()
     def get_oil_painting_guide() -> str:
@@ -142,6 +171,28 @@ see the canvas without it!  Call preview_canvas:
 - Whenever you are unsure whether strokes landed correctly.
 If something looks wrong, fix it immediately before adding more layers.
 Paint stacks — mistakes buried under new strokes are much harder to fix.
+
+--- BRUSH SHAPES ---
+Use set_brush_shape() or per-stroke "brush_shape" in batch_strokes to
+switch brush types.  Each shape creates a distinct mark:
+
+- "round" (default): Circular dab, uniform coverage.  Good general purpose.
+- "flat": Wide rectangular mark aligned with stroke direction (~3:1 aspect).
+  Best for blocking in skies, backgrounds, and broad washes.  Covers area
+  fast with fewer strokes.
+- "filbert": Oval mark aligned with stroke direction (~2.5:1 aspect).
+  Softer edges than flat.  The most versatile — use for general painting,
+  blending edges, and organic forms.
+- "fan": Very wide, very thin mark (~6:1 aspect).  Applies less paint.
+  Use for light blending passes, grass, foliage texture, and hair.
+- "palette_knife": Hard-edged rectangle (~4:1 aspect), minimal falloff.
+  Creates bold impasto marks with extra height.  Great for thick highlights,
+  texture accents, and expressive abstract marks.
+
+Tips: Switch shapes during a painting!  Use flat for the block-in phase,
+filbert for development, and palette_knife for bold detail highlights.
+You can mix shapes within a single batch_strokes call using per-stroke
+"brush_shape" overrides.
 
 --- COMMON MISTAKES ---
 - DO NOT use draw_line/draw_path individually.  Use batch_strokes.
@@ -301,6 +352,8 @@ it correctly.  Don't keep building on top of mistakes.
           - Optional per-stroke overrides (applied before the stroke):
             - "color": [r, g, b]       — change color for this stroke
             - "brush_size": int        — change brush size for this stroke
+            - "brush_shape": str       — change brush shape for this stroke
+              ("round", "flat", "filbert", "fan", "palette_knife")
 
         Example — paint three overlapping strokes with different colors:
         [
