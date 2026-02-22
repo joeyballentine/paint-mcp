@@ -41,10 +41,13 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
         or flood fill). Toggle off to return to normal drawing.
 
         IMPORTANT — call get_oil_painting_guide() after enabling this mode
-        to learn proper oil-painting technique for realistic results."""
+        to learn proper oil-painting technique for realistic results.
+        When disabling, call get_drawing_guide() for standard mode tips."""
         _oil_paint[0] = enabled
         command_queue.put({"action": "set_oil_paint", "enabled": enabled})
-        return f"Oil paint mode {'enabled' if enabled else 'disabled'}"
+        if enabled:
+            return "Oil paint mode enabled. Call get_oil_painting_guide() to learn proper technique."
+        return "Oil paint mode disabled. Call get_drawing_guide() for standard drawing tips."
 
     @mcp.tool()
     def get_oil_painting_guide() -> str:
@@ -147,6 +150,83 @@ Paint stacks — mistakes buried under new strokes are much harder to fix.
 - DO NOT leave white canvas showing through.  Cover everything.
 - DO NOT use pure black or pure white.  Use dark blues/browns and
   warm creams instead.
+"""
+
+    @mcp.tool()
+    def get_drawing_guide() -> str:
+        """Return a guide to standard (non-oil-paint) drawing technique.
+        Call this when working in normal mode for best results."""
+        return """
+=== STANDARD DRAWING GUIDE ===
+
+Normal mode gives you clean, precise strokes — no paint mixing or
+depletion.  Every stroke is exactly the color you set.  You have
+access to ALL tools: lines, paths, rectangles, ellipses, flood fill,
+and batch_strokes.
+
+=== TOOL SELECTION ===
+- batch_strokes: PREFERRED for any multi-stroke work.  Set per-stroke
+  color and brush_size inline.  Much faster than individual calls.
+- draw_rect / draw_ellipse: Use for geometric shapes.  Set filled=true
+  for solid shapes, or leave false for outlines at current brush_size.
+- flood_fill: Fill enclosed regions with the current color.  Great for
+  backgrounds and large uniform areas.  Make sure the region is fully
+  enclosed first, or paint will leak everywhere.
+- draw_line / draw_path / draw_point: Fine for single strokes, but
+  prefer batch_strokes when you need more than one or two.
+
+=== BUILDING AN IMAGE ===
+1. PLAN THE LAYOUT.  Decide where major shapes go before drawing.
+   Normal mode strokes are opaque — later strokes cover earlier ones.
+2. BACKGROUNDS FIRST.  Use flood_fill or large filled rectangles to
+   lay down background colors before adding detail on top.
+   >>> PREVIEW after setting up the background. <<<
+3. LARGE SHAPES NEXT.  Block in major forms with filled rects,
+   ellipses, or thick batch_strokes lines.
+   >>> PREVIEW to verify shapes are positioned correctly. <<<
+4. OUTLINES & STRUCTURE.  Add borders, edges, and structural lines
+   with thinner strokes (brush_size 2-5).
+5. DETAIL & TEXTURE.  Small strokes, dots, and thin paths for fine
+   detail.  Use batch_strokes with many strokes per call.
+   >>> PREVIEW after each detail pass. <<<
+6. FINAL TOUCHES.  Highlights, shadows, small corrections.
+   >>> FINAL PREVIEW to verify the finished image. <<<
+
+=== PREVIEWING YOUR WORK ===
+CRITICAL: Use preview_canvas CONSTANTLY.  You cannot see the canvas!
+- AFTER EVERY MAJOR STEP (background, large shapes, detail passes).
+- BEFORE adding detail on top of existing work — confirm the base
+  looks right first, because later strokes will cover it.
+- After flood_fill — verify it didn't leak into unintended areas.
+- Whenever you are unsure if coordinates or sizes are correct.
+Fix problems IMMEDIATELY.  Use undo() if a step went wrong, then redo
+it correctly.  Don't keep building on top of mistakes.
+
+=== COORDINATE TIPS ===
+- Canvas is 800 wide x 600 tall.  Origin (0,0) is top-left.
+- X increases rightward, Y increases downward.
+- Rectangles and ellipses: (x, y) is the TOP-LEFT corner of the
+  bounding box, not the center.
+- Center of canvas: (400, 300).
+
+=== COLOR STRATEGY ===
+- Set color with set_color or per-stroke "color" in batch_strokes.
+- For shading and depth, use darker variants of a color for shadows
+  and lighter variants for highlights (shift all channels by 30-60).
+- For outlines, use a color 40-80 units darker than the fill color.
+- Avoid pure black (0,0,0) for outlines — use dark grey (30,30,30)
+  or a dark saturated color instead.  It looks more natural.
+
+=== COMMON MISTAKES ===
+- DO NOT forget to preview.  Blind drawing leads to misaligned shapes
+  and wasted undo steps.
+- DO NOT flood_fill before closing a region.  The fill will leak across
+  the entire canvas and you'll need to undo.
+- DO NOT draw detail before confirming the background and layout.
+- DO NOT use tiny brush_size (1-2) for large areas — it's slow and
+  leaves visible gaps.  Use filled shapes or large brush_size instead.
+- DO NOT guess coordinates for precise alignment.  Preview first, then
+  adjust based on what you see.
 """
 
     @mcp.tool()
