@@ -1,6 +1,9 @@
 """MCP tool definitions. Pushes drawing commands onto a thread-safe queue."""
 
+import json
 import queue
+import threading
+from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 
@@ -95,5 +98,43 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
         """Undo the last drawing operation."""
         command_queue.put({"action": "undo"})
         return "Undo performed"
+
+    def _request_response(cmd: dict, timeout: float = 5.0):
+        """Send a command to the main thread and wait for a response."""
+        event = threading.Event()
+        result: dict = {}
+        cmd["_event"] = event
+        cmd["_result"] = result
+        command_queue.put(cmd)
+        if not event.wait(timeout):
+            raise TimeoutError("Main thread did not respond in time")
+        if "error" in result:
+            raise RuntimeError(result["error"])
+        return result["data"]
+
+    @mcp.tool()
+    def get_canvas_pixels(x: Optional[int] = None, y: Optional[int] = None,
+                          width: Optional[int] = None, height: Optional[int] = None) -> str:
+        """Return RGB pixel data from the canvas as a JSON 2D array of [r,g,b] values (row-major).
+
+        All parameters are optional. Omit them to get the full canvas (800x600 = 480K pixels — very large!).
+        For efficiency, request a small region instead, e.g. x=100, y=100, width=50, height=50."""
+        cmd: dict = {"action": "get_pixels"}
+        if x is not None:
+            cmd["x"] = x
+        if y is not None:
+            cmd["y"] = y
+        if width is not None:
+            cmd["w"] = width
+        if height is not None:
+            cmd["h"] = height
+        pixels = _request_response(cmd)
+        return json.dumps(pixels)
+
+    @mcp.tool()
+    def save_canvas(file_path: str) -> str:
+        """Save the current canvas to a PNG file at the given path."""
+        result = _request_response({"action": "save_file", "path": file_path})
+        return result
 
     return mcp

@@ -129,3 +129,30 @@ class Canvas:
 
     def _do_undo(self, cmd: dict):
         self.undo()
+
+    # --- Read-only operations (no undo) ---
+
+    def get_pixels_rgb(self, x: int = 0, y: int = 0,
+                       w: int | None = None, h: int | None = None) -> list[list[list[int]]]:
+        """Return a 2D list of [r, g, b] values (row-major) for the given region."""
+        if w is None:
+            w = self.width - x
+        if h is None:
+            h = self.height - y
+        # Clamp to canvas bounds
+        x = max(0, min(x, self.width - 1))
+        y = max(0, min(y, self.height - 1))
+        w = min(w, self.width - x)
+        h = min(h, self.height - y)
+
+        pixel_array = pygame.PixelArray(self.surface)
+        rows = []
+        for row in range(y, y + h):
+            r_list = []
+            for col in range(x, x + w):
+                mapped = pixel_array[col, row]
+                r, g, b, _ = self.surface.unmap_rgb(mapped)
+                r_list.append([r, g, b])
+            rows.append(r_list)
+        pixel_array.close()
+        return rows
