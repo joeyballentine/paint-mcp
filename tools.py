@@ -17,6 +17,7 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
     # Local state mirror so get_canvas_info can respond without touching pygame
     _color = [0, 0, 0]
     _brush_size = [3]
+    _oil_paint = [False]
 
     @mcp.tool()
     def get_canvas_info() -> str:
@@ -24,8 +25,21 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
         return (
             f"Canvas: {width}x{height}, "
             f"color: rgb({_color[0]}, {_color[1]}, {_color[2]}), "
-            f"brush_size: {_brush_size[0]}"
+            f"brush_size: {_brush_size[0]}, "
+            f"oil_paint_mode: {'on' if _oil_paint[0] else 'off'}"
         )
+
+    @mcp.tool()
+    def set_oil_paint_mode(enabled: bool) -> str:
+        """Enable or disable oil-paint mode.
+
+        When enabled, all strokes simulate oil paint: colors mix/blend with
+        the existing canvas, brush strokes have natural variation, and only
+        point, line, and path drawing are available (no rectangles, ellipses,
+        or flood fill). Toggle off to return to normal drawing."""
+        _oil_paint[0] = enabled
+        command_queue.put({"action": "set_oil_paint", "enabled": enabled})
+        return f"Oil paint mode {'enabled' if enabled else 'disabled'}"
 
     @mcp.tool()
     def set_color(r: int, g: int, b: int) -> str:
@@ -58,6 +72,8 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
     @mcp.tool()
     def draw_rect(x: int, y: int, width: int, height: int, filled: bool = False) -> str:
         """Draw a rectangle. (x, y) is the top-left corner."""
+        if _oil_paint[0]:
+            return "Blocked: rectangles are not available in oil-paint mode. Use draw_line or draw_path instead."
         command_queue.put({
             "action": "draw_rect",
             "x": x, "y": y, "width": width, "height": height, "filled": filled,
@@ -68,6 +84,8 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
     @mcp.tool()
     def draw_ellipse(x: int, y: int, width: int, height: int, filled: bool = False) -> str:
         """Draw an ellipse bounded by the rectangle at (x, y) with given size."""
+        if _oil_paint[0]:
+            return "Blocked: ellipses are not available in oil-paint mode. Use draw_line or draw_path instead."
         command_queue.put({
             "action": "draw_ellipse",
             "x": x, "y": y, "width": width, "height": height, "filled": filled,
@@ -84,6 +102,8 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
     @mcp.tool()
     def flood_fill(x: int, y: int) -> str:
         """Bucket-fill the area at (x, y) with the current color."""
+        if _oil_paint[0]:
+            return "Blocked: flood fill is not available in oil-paint mode. Use draw_line or draw_path instead."
         command_queue.put({"action": "flood_fill", "x": x, "y": y})
         return f"Flood filled at ({x}, {y})"
 
