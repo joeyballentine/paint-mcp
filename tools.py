@@ -65,7 +65,7 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
         - "fan"           — Very wide, very thin dab. Use for light blending passes
                             and foliage/grass texture. Applies less paint per dab.
         - "palette_knife" — Hard-edged rectangle with minimal paint falloff. Creates
-                            bold impasto marks with sharp edges and extra height.
+                            bold marks with sharp edges.
 
         The shape affects how each dab is stamped: non-round shapes are oriented
         along the stroke direction automatically. Works in both oil-paint and
@@ -186,7 +186,7 @@ switch brush types.  Each shape creates a distinct mark:
 - "fan": Very wide, very thin mark (~6:1 aspect).  Applies less paint.
   Use for light blending passes, grass, foliage texture, and hair.
 - "palette_knife": Hard-edged rectangle (~4:1 aspect), minimal falloff.
-  Creates bold impasto marks with extra height.  Great for thick highlights,
+  Creates bold marks with sharp edges.  Great for thick highlights,
   texture accents, and expressive abstract marks.
 
 Tips: Switch shapes during a painting!  Use flat for the block-in phase,

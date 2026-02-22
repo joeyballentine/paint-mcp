@@ -4,7 +4,7 @@ import math
 import random
 import pygame
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 VALID_BRUSH_SHAPES = ("round", "flat", "filbert", "fan", "palette_knife")
@@ -22,41 +22,23 @@ class DrawState:
 class Canvas:
     MAX_UNDO = 50
 
-    # --- Impasto lighting constants ---
-    LIGHT_DIR = np.array([-0.3, -0.5, 1.0])
-    LIGHT_DIR = LIGHT_DIR / np.linalg.norm(LIGHT_DIR)
-    # AMBIENT is computed so that a flat surface (normal=(0,0,1)) gets
-    # light_factor = 1.0 exactly, avoiding brightness shift on unpainted areas.
-    DIFFUSE_STRENGTH = 0.25
-    AMBIENT = 1.0 - DIFFUSE_STRENGTH * LIGHT_DIR[2]  # ~0.784
-    SPECULAR_STRENGTH = 0.15
-    SPECULAR_SHININESS = 24
-    HEIGHT_SCALE = 0.6
-    MAX_HEIGHT = 15.0
-
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
         self.state = DrawState()
         self.surface = pygame.Surface((width, height))
         self.surface.fill(self.state.background_color)
-        self.height_map = np.zeros((height, width), dtype=np.float32)
-        self.display_surface = pygame.Surface((width, height))
-        self._lighting_dirty = True
-        self.impasto_visible = False
-        self._undo_stack: list[tuple[pygame.Surface, np.ndarray]] = []
+        self._undo_stack: list[pygame.Surface] = []
 
     def _save_undo(self):
         if len(self._undo_stack) >= self.MAX_UNDO:
             self._undo_stack.pop(0)
-        self._undo_stack.append((self.surface.copy(), self.height_map.copy()))
-        self._lighting_dirty = True
+        self._undo_stack.append(self.surface.copy())
 
     def undo(self) -> bool:
         if not self._undo_stack:
             return False
-        self.surface, self.height_map = self._undo_stack.pop()
-        self._lighting_dirty = True
+        self.surface = self._undo_stack.pop()
         return True
 
     def execute(self, cmd: dict):
@@ -110,80 +92,6 @@ class Canvas:
         """Mix two colors. ratio=1.0 means all top, 0.0 means all base."""
         return tuple(int(b * (1 - ratio) + t * ratio) for b, t in zip(base, top))
 
-    def _accumulate_height(self, cx: int, cy: int, radius: int, strength: float):
-        """Add gaussian-ish height to the height_map in a disc around (cx, cy)."""
-        r = max(1, radius)
-        y_lo = max(0, cy - r)
-        y_hi = min(self.height, cy + r + 1)
-        x_lo = max(0, cx - r)
-        x_hi = min(self.width, cx + r + 1)
-        if y_lo >= y_hi or x_lo >= x_hi:
-            return
-        ys = np.arange(y_lo, y_hi, dtype=np.float32) - cy
-        xs = np.arange(x_lo, x_hi, dtype=np.float32) - cx
-        xx, yy = np.meshgrid(xs, ys)
-        dist_sq = xx * xx + yy * yy
-        r_sq = float(r * r)
-        mask = dist_sq <= r_sq
-        # Gaussian-ish falloff: peak at center, near zero at edge
-        falloff = np.exp(-3.0 * dist_sq / r_sq)
-        contribution = strength * falloff * mask
-        self.height_map[y_lo:y_hi, x_lo:x_hi] += contribution
-        np.clip(self.height_map[y_lo:y_hi, x_lo:x_hi], 0, self.MAX_HEIGHT,
-                out=self.height_map[y_lo:y_hi, x_lo:x_hi])
-
-    def _recompute_lighting(self):
-        """Apply impasto lighting to raw surface → display_surface."""
-        # Copy raw pixels and release the surface lock immediately
-        raw = pygame.surfarray.pixels3d(self.surface)  # shape (W, H, 3)
-        raw_hwc = np.transpose(raw, (1, 0, 2)).astype(np.float32)  # (H, W, 3) copy
-        del raw  # release surface lock
-
-        # Compute normals from height_map gradient
-        dh_dy, dh_dx = np.gradient(self.height_map * self.HEIGHT_SCALE)
-        # Normal vectors: (-dh/dx, -dh/dy, 1.0), then normalize
-        norm = np.sqrt(dh_dx * dh_dx + dh_dy * dh_dy + 1.0)
-        nx = -dh_dx / norm
-        ny = -dh_dy / norm
-        nz = 1.0 / norm
-
-        # Diffuse: dot(N, L)
-        lx, ly, lz = self.LIGHT_DIR
-        diffuse = np.clip(nx * lx + ny * ly + nz * lz, 0.0, 1.0)
-
-        # Specular: Blinn-Phong with half-vector H = normalize(L + V)
-        # View direction is straight up: V = (0, 0, 1)
-        hv = np.array([lx, ly, lz + 1.0])
-        hv = hv / np.linalg.norm(hv)
-        n_dot_h = np.clip(nx * hv[0] + ny * hv[1] + nz * hv[2], 0.0, 1.0)
-        specular = np.power(n_dot_h, self.SPECULAR_SHININESS)
-        # Only show specular highlights on raised (painted) areas
-        specular *= (self.height_map > 0.05)
-
-        # Final color — AMBIENT is tuned so flat surfaces get factor=1.0
-        light_factor = self.AMBIENT + self.DIFFUSE_STRENGTH * diffuse
-        light_factor = light_factor[:, :, np.newaxis]  # broadcast to (H, W, 1)
-        specular_term = (self.SPECULAR_STRENGTH * specular * 255.0)[:, :, np.newaxis]
-
-        result = raw_hwc * light_factor + specular_term
-        np.clip(result, 0, 255, out=result)
-
-        # Write to display surface
-        out = np.transpose(result.astype(np.uint8), (1, 0, 2))  # back to (W, H, 3)
-        display_arr = pygame.surfarray.pixels3d(self.display_surface)
-        display_arr[:] = out
-        del display_arr  # release surface lock
-
-        self._lighting_dirty = False
-
-    def get_display_surface(self) -> pygame.Surface:
-        """Return the lit display surface if impasto is visible, else raw."""
-        if not self.impasto_visible:
-            return self.surface
-        if self._lighting_dirty:
-            self._recompute_lighting()
-        return self.display_surface
-
     def _oil_dab(self, cx: int, cy: int, radius: int, brush_color: tuple = None,
                  paint_strength: float = 0.75, direction: float = 0.0):
         """Paint a single oil-paint dab, dispatching to shape-specific method.
@@ -233,20 +141,15 @@ class Canvas:
                 ey = int(cy + r_jitter * math.sin(a))
                 pygame.draw.line(self.surface, blended, (cx, cy), (ex, ey), 1)
 
-        # Accumulate height for impasto lighting.
-        size_scale = 1.0 / (1.0 + max(0, radius - 12) * 0.06)
-        self._accumulate_height(cx, cy, radius, paint_strength * 0.8 * size_scale)
-
     def _dab_shaped(self, cx: int, cy: int, radius: int, brush_color: tuple,
                     paint_strength: float, direction: float,
                     half_w: float, half_h: float, is_ellipse: bool = False,
-                    hard_edge: bool = False, height_mult: float = 1.0):
+                    hard_edge: bool = False):
         """Generic shaped dab renderer using numpy bulk ops.
 
         half_w, half_h: half-extents in local coords (before rotation).
         is_ellipse: True for elliptical mask (filbert), False for rectangular.
         hard_edge: True for minimal falloff (palette knife).
-        height_mult: multiplier for impasto height accumulation.
         """
         cos_d = math.cos(-direction)
         sin_d = math.sin(-direction)
@@ -346,12 +249,6 @@ class Canvas:
         raw[x_lo:x_hi, y_lo:y_hi][mask_t] = blended_t[mask_t]
         del raw  # release surface lock
 
-        # Accumulate height for impasto
-        effective_r = int(max(half_w, half_h))
-        size_scale = 1.0 / (1.0 + max(0, effective_r - 12) * 0.06)
-        self._accumulate_height(cx, cy, effective_r,
-                                paint_strength * 0.8 * size_scale * height_mult)
-
     def _dab_flat(self, cx: int, cy: int, radius: int, brush_color: tuple,
                   paint_strength: float, direction: float):
         """Flat brush: wide rectangle, aspect ratio ~3:1."""
@@ -379,12 +276,11 @@ class Canvas:
 
     def _dab_knife(self, cx: int, cy: int, radius: int, brush_color: tuple,
                    paint_strength: float, direction: float):
-        """Palette knife: hard-edged rectangle, aspect ratio ~4:1, extra impasto."""
+        """Palette knife: hard-edged rectangle, aspect ratio ~4:1."""
         half_w = radius * 2.0
         half_h = radius * 0.5
         self._dab_shaped(cx, cy, radius, brush_color, paint_strength, direction,
-                         half_w, half_h, is_ellipse=False, hard_edge=True,
-                         height_mult=1.8)
+                         half_w, half_h, is_ellipse=False, hard_edge=True)
 
     def _oil_stroke(self, points: list[tuple[int, int]]):
         """Lay down oil-paint dabs along a series of points.
@@ -740,7 +636,6 @@ class Canvas:
     def _do_clear(self, cmd: dict):
         self._save_undo()
         self.surface.fill(self.state.background_color)
-        self.height_map[:] = 0
 
     def _do_undo(self, cmd: dict):
         self.undo()
