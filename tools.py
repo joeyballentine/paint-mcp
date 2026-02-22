@@ -52,89 +52,85 @@ def create_mcp_server(command_queue: queue.Queue, width: int = 800, height: int 
         return """
 === OIL PAINTING TECHNIQUE GUIDE ===
 
-This canvas simulates real oil paint physics.  The brush carries a finite
-load of pigment that depletes and picks up canvas color as you stroke.
-Follow these principles for realistic results.
+This canvas simulates real oil paint physics.  The brush carries pigment
+that gradually depletes and picks up canvas color as you stroke.
+Each stroke has a generous paint load that lasts well over 100 dabs,
+so individual strokes are strong and opaque.  The key to realism is
+MANY overlapping strokes building up texture and color variation.
 
---- USE batch_strokes — IT IS YOUR PRIMARY TOOL ---
-The batch_strokes tool lets you execute MANY strokes in a single call.
-Each stroke in the batch starts with a fresh brush load.  You can set
-color and brush_size per-stroke inside the batch.  This is FAR more
-efficient than calling draw_line/draw_path one at a time.
+=== CRITICAL: USE batch_strokes FOR EVERYTHING ===
+batch_strokes is your PRIMARY and PREFERRED tool.  It executes many
+strokes in one call.  Each stroke reloads the brush automatically.
+You can set color and brush_size per-stroke inline.
 
-Example — block in a sky area with 8 overlapping strokes:
+You MUST use batch_strokes with LARGE batches.  A good painting needs
+hundreds of strokes.  Send 20-50 strokes per batch_strokes call, and
+make MULTIPLE batch_strokes calls to build up the painting.
+
+DO NOT call draw_line or draw_path individually — always use
+batch_strokes instead.
+
+Example — block in a sky with many overlapping strokes:
   batch_strokes([
-    {"type":"line","color":[70,100,160],"brush_size":20,"x1":0,"y1":30,"x2":200,"y2":25},
-    {"type":"line","color":[80,115,175],"brush_size":22,"x1":0,"y1":55,"x2":200,"y2":48},
-    {"type":"line","color":[90,130,185],"brush_size":18,"x1":10,"y1":78,"x2":190,"y2":72},
-    {"type":"line","color":[100,140,195],"brush_size":20,"x1":0,"y1":100,"x2":200,"y2":95},
-    ...
+    {"type":"line","color":[70,100,160],"brush_size":20,"x1":0,"y1":20,"x2":250,"y2":15},
+    {"type":"line","color":[75,108,168],"brush_size":22,"x1":0,"y1":38,"x2":260,"y2":32},
+    {"type":"line","color":[80,115,175],"brush_size":18,"x1":5,"y1":55,"x2":245,"y2":50},
+    {"type":"line","color":[72,105,162],"brush_size":20,"x1":0,"y1":70,"x2":250,"y2":66},
+    {"type":"line","color":[85,118,178],"brush_size":22,"x1":0,"y1":85,"x2":255,"y2":80},
+    {"type":"line","color":[90,125,182],"brush_size":19,"x1":5,"y1":100,"x2":248,"y2":96},
+    {"type":"line","color":[78,110,170],"brush_size":21,"x1":0,"y1":115,"x2":250,"y2":110},
+    {"type":"line","color":[95,130,188],"brush_size":20,"x1":0,"y1":130,"x2":252,"y2":125},
+    ... continue for entire area ...
   ])
 
-ALWAYS prefer batch_strokes over individual draw_line/draw_path calls.
-A typical painting requires 50-200+ strokes — batch them in groups of
-10-30 per call.
+Notice: each stroke has SLIGHTLY different color (vary 5-15 per channel)
+and slightly different brush_size.  This creates natural color richness.
 
 --- STROKE MECHANICS ---
-- USE MANY SHORT STROKES.  Each stroke has a generous paint load (~80 dabs
-  before serious depletion), but oil painting is built from layered,
-  overlapping strokes — not single sweeps.
-- Each stroke in a batch_strokes call reloads the brush automatically.
-- VARY BRUSH SIZE per stroke.  Use larger brushes (15-30) for broad base
-  layers and washes, medium (8-15) for mid-detail, and small (3-7) for
-  fine accents.  Set brush_size on each stroke in the batch.
-- STROKE DIRECTION MATTERS.  Parallel strokes in one area create a visual
-  "grain" like real brushwork.  Follow the form of what you're painting:
-  horizontal for skies, vertical for tree trunks, curved for round objects.
-- For paths, keep each path to 3-8 coordinate pairs.  For lines, each
-  line segment is one stroke.
+- USE MANY OVERLAPPING SHORT STROKES.  Each stroke is strong and opaque
+  with plenty of paint.  The realism comes from layering many strokes,
+  not from individual strokes running out of paint.
+- OVERLAP STROKES DENSELY.  Adjacent strokes should overlap by ~30-50%
+  of the brush width.  Don't leave gaps between strokes.
+- VARY BRUSH SIZE per stroke (15-30 for base, 8-15 for mid, 3-7 for detail).
+- STROKE DIRECTION MATTERS.  Follow the form: horizontal for skies,
+  vertical for tree trunks, curved for round objects.
+- For paths, keep each to 3-8 coordinate pairs.  For lines, use line type.
+- COVER THE ENTIRE CANVAS.  Don't leave white gaps.  Every area should be
+  painted with multiple overlapping strokes.
 
 --- COLOR & LAYERING ---
-- WORK DARK TO LIGHT.  Lay down darks and mid-tones first, then build up
-  highlights.  Oil paint is opaque; lighter colors can cover darker ones
-  with a fresh loaded stroke.
-- LIMIT YOUR PALETTE.  Pick 4-6 base colors and mix by overlapping strokes
-  rather than setting dozens of different RGB values.  Adjacent strokes
-  naturally blend where they overlap — this is the key to rich color.
-- VARY COLOR SLIGHTLY per stroke.  Don't use the exact same RGB for every
-  stroke in an area.  Shift by 5-15 units per channel between strokes
-  for richness: e.g. [70,100,160], [75,105,155], [65,95,165].
-- OVERLAPPING STROKES MIX.  Because the brush picks up existing color,
-  painting a yellow stroke over a blue area produces greenish tones
-  naturally.  Use this intentionally for color transitions.
-- TEMPERATURE SHIFTS.  Warm colors (reds, oranges, yellows) come forward;
-  cool colors (blues, greens, purples) recede.  Use this for depth.
+- WORK DARK TO LIGHT.  Darks and mid-tones first, highlights last.
+- LIMIT YOUR PALETTE to 4-6 base colors.  Mix by overlapping.
+- ALWAYS VARY COLOR between strokes in the same area.  Shift 5-15 units
+  per RGB channel.  Never use the exact same color for adjacent strokes.
+- OVERLAPPING STROKES MIX.  Yellow over blue → green tones automatically.
+- Use warm colors (reds/oranges/yellows) for foreground, cool colors
+  (blues/greens/purples) for background and distance.
 
 --- BLENDING ---
-- USE blend_path SPARINGLY with LOW strength (0.05-0.15).  Multiple gentle
-  passes are far better than one aggressive blend.  Real painters blend
-  by lightly dragging a clean brush — not by smashing colors together.
-- BLEND ALONG EDGES, not across whole areas.  Soften the boundary between
-  two color zones with a short blend_path that follows the edge.
-- LEAVE SOME EDGES HARD.  Not everything should be blended.  Crisp
-  transitions between strokes give the painting energy and texture.
+- USE blend_path SPARINGLY with LOW strength (0.05-0.15).
+- BLEND ALONG EDGES only.  Don't blend entire areas.
+- LEAVE SOME EDGES HARD for energy and texture.
 
---- COMPOSITION WORKFLOW ---
-1. BLOCK IN: batch_strokes with large brush (20-30), rough shapes and
-   value masses.  Use just 3-4 colors.  20-40 short overlapping strokes
-   per batch call.
-2. DEVELOP: batch_strokes with medium brush (10-15), refine shapes and
-   add mid-tone colors.  Let strokes follow the form of objects.
-3. DETAIL: batch_strokes with small brush (3-8), add highlights, darks,
-   and accents.  Very short strokes or single dabs.
-4. SOFTEN (optional): Use blend_path at 0.05-0.10 strength to soften
-   select edges.  Do NOT blend everything.
+--- WORKFLOW ---
+1. BLOCK IN: 2-3 batch_strokes calls, 30-50 strokes each, large brush
+   (20-30).  Cover the entire canvas with rough color masses.
+2. DEVELOP: 2-3 batch_strokes calls, 20-40 strokes each, medium brush
+   (10-15).  Refine shapes, add color variation.
+3. DETAIL: 1-2 batch_strokes calls, 15-30 strokes each, small brush
+   (3-8).  Highlights, darks, accents.
+4. SOFTEN (optional): blend_path at 0.05-0.10 on select edges.
+
+Total for a complete painting: 5-10 batch_strokes calls, 150-400 strokes.
 
 --- COMMON MISTAKES ---
-- DO NOT call draw_line/draw_path one at a time in a loop.  Use
-  batch_strokes to send many strokes in one call.
-- DO NOT use long paths with 50+ points — the brush depletes and you
-  just smear.  Keep paths to 3-8 points and use many of them.
-- DO NOT blend at strength > 0.15 — it destroys texture and looks muddy.
-- DO NOT paint with pure black (0,0,0) or pure white (255,255,255).
-  Use dark blues/browns for darks and warm creams for highlights.
-- DO NOT try to cover an area with one stroke.  Build up with many short
-  overlapping strokes for rich, textured coverage.
+- DO NOT use draw_line/draw_path individually.  Use batch_strokes.
+- DO NOT send small batches of 3-5 strokes.  Send 20-50 per call.
+- DO NOT use the same exact color for every stroke in an area.
+- DO NOT leave white canvas showing through.  Cover everything.
+- DO NOT use pure black or pure white.  Use dark blues/browns and
+  warm creams instead.
 """
 
     @mcp.tool()

@@ -126,12 +126,12 @@ class Canvas:
 
         # --- paint-load parameters ---
         # Half-life in dab-steps: after this many dabs, paint is at 50%
-        half_life = 80
+        half_life = 140
         decay = 0.5 ** (1.0 / half_life)      # per-step multiplier
 
-        paint_load = 0.92                       # current opacity of brush paint
+        paint_load = 0.95                       # current opacity of brush paint
         carried_color = self.state.color        # what's on the brush right now
-        pickup_rate = 0.05                      # how fast canvas color mixes in
+        pickup_rate = 0.03                      # how fast canvas color mixes in
 
         for i, (px, py) in enumerate(points):
             # Sample what's under the brush before we stamp
@@ -143,7 +143,7 @@ class Canvas:
 
             size_jitter = random.uniform(0.88, 1.12)
             # Brush also loses width as paint runs out
-            size_factor = 0.7 + 0.3 * paint_load
+            size_factor = 0.8 + 0.2 * paint_load
             r = max(1, int(self.state.brush_size * size_jitter * size_factor))
             self._oil_dab(px, py, r, brush_color=carried_color,
                           paint_strength=paint_load)
@@ -151,7 +151,7 @@ class Canvas:
             # Exponential depletion
             paint_load *= decay
             # Floor so the tail doesn't become invisible
-            paint_load = max(paint_load, 0.12)
+            paint_load = max(paint_load, 0.18)
 
     def _blend_dab(self, cx: int, cy: int, radius: int, strength: float = 0.15,
                    dx_dir: float = 0.0, dy_dir: float = 0.0):
