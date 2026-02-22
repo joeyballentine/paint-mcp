@@ -34,6 +34,7 @@ This opens an 800x600 pygame canvas and starts the MCP server on stdio. Connect 
 | `clear_canvas` | Clear to white |
 | `undo` | Undo last operation |
 | `get_canvas_pixels` | Read pixel data from a region |
+| `preview_canvas` | Save canvas to a temp PNG and return the path for visual inspection |
 | `save_canvas` | Save canvas to a PNG file |
 
 ## Oil Paint Mode

@@ -1,7 +1,9 @@
 """MCP tool definitions. Pushes drawing commands onto a thread-safe queue."""
 
 import json
+import os
 import queue
+import tempfile
 import threading
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
@@ -286,6 +288,18 @@ Total for a complete painting: 5-10 batch_strokes calls, 150-400 strokes.
             cmd["h"] = height
         pixels = _request_response(cmd)
         return json.dumps(pixels)
+
+    @mcp.tool()
+    def preview_canvas() -> str:
+        """Save the current canvas to a temporary PNG file and return its path.
+
+        Use this to visually inspect your work.  The returned path can be
+        opened with a vision/image-reading tool.  The file is placed in the
+        system temp directory and will be cleaned up automatically."""
+        fd, path = tempfile.mkstemp(suffix=".png", prefix="paint_mcp_preview_")
+        os.close(fd)
+        _request_response({"action": "save_file", "path": path})
+        return path
 
     @mcp.tool()
     def save_canvas(file_path: str) -> str:
