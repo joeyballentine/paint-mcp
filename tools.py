@@ -118,13 +118,27 @@ and slightly different brush_size.  This creates natural color richness.
 --- WORKFLOW ---
 1. BLOCK IN: 2-3 batch_strokes calls, 30-50 strokes each, large brush
    (20-30).  Cover the entire canvas with rough color masses.
+   >>> PREVIEW after blocking in to check coverage and color balance. <<<
 2. DEVELOP: 2-3 batch_strokes calls, 20-40 strokes each, medium brush
    (10-15).  Refine shapes, add color variation.
+   >>> PREVIEW after each batch to catch problems early. <<<
 3. DETAIL: 1-2 batch_strokes calls, 15-30 strokes each, small brush
    (3-8).  Highlights, darks, accents.
 4. SOFTEN (optional): blend_path at 0.05-0.10 on select edges.
+   >>> FINAL PREVIEW to verify the finished painting. <<<
 
 Total for a complete painting: 5-10 batch_strokes calls, 150-400 strokes.
+
+--- PREVIEWING YOUR WORK ---
+CRITICAL: Use preview_canvas CONSTANTLY to check your work.  You cannot
+see the canvas without it!  Call preview_canvas:
+- AFTER EVERY LARGE CHANGE (blocking in, major color passes, big shapes).
+  Large strokes can overpaint earlier work or leave unexpected gaps.
+- After EACH development and detail pass to verify the result.
+- BEFORE and AFTER blending to compare the effect.
+- Whenever you are unsure whether strokes landed correctly.
+If something looks wrong, fix it immediately before adding more layers.
+Paint stacks — mistakes buried under new strokes are much harder to fix.
 
 --- COMMON MISTAKES ---
 - DO NOT use draw_line/draw_path individually.  Use batch_strokes.
