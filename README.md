@@ -51,6 +51,20 @@ When oil paint mode is enabled:
 - **Shapes disabled** — rectangles, ellipses, and flood fill are blocked. Only points, lines, and paths are available.
 - **`batch_strokes`** is the recommended way to paint — send many short strokes per call, each with its own color and brush size.
 
+## Examples
+
+**Regular mode**
+
+| Starry Night | Meme |
+|:---:|:---:|
+| ![Starry Night](examples/starry_night.png) | ![Meme preview](examples/meme_preview.png) |
+
+**Oil paint mode**
+
+| Sunset | Alien Sunset |
+|:---:|:---:|
+| ![Sunset painting](examples/sunset_painting.png) | ![Alien sunset Van Gogh](examples/alien_sunset_vangogh.png) |
+
 ## Architecture
 
 - `server.py` — Entry point. Runs the pygame main loop and drains commands from a thread-safe queue.
